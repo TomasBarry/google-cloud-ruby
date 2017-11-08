@@ -75,6 +75,43 @@ namespace :acceptance do
     Rake::Task["acceptance"].invoke
   end
 
+  desc "Run acceptance cleanup."
+  task :cleanup, :project, :keyfile do |t, args|
+    project = args[:project]
+    project ||= ENV["FIRESTORE_TEST_PROJECT"] || ENV["GCLOUD_TEST_PROJECT"]
+    keyfile = args[:keyfile]
+    keyfile ||= ENV["FIRESTORE_TEST_KEYFILE"] || ENV["GCLOUD_TEST_KEYFILE"]
+    if keyfile
+      keyfile = File.read keyfile
+    else
+      keyfile ||= ENV["FIRESTORE_TEST_KEYFILE_JSON"] || ENV["GCLOUD_TEST_KEYFILE_JSON"]
+    end
+    if project.nil? || keyfile.nil?
+      fail "You must provide a project and keyfile. e.g. rake acceptance[test123, /path/to/keyfile.json] or FIRESTORE_TEST_PROJECT=test123 FIRESTORE_TEST_KEYFILE=/path/to/keyfile.json rake acceptance"
+    end
+    # always overwrite when running tests
+    ENV["FIRESTORE_PROJECT"] = project
+    ENV["FIRESTORE_KEYFILE"] = nil
+    ENV["FIRESTORE_KEYFILE_JSON"] = keyfile
+
+    $LOAD_PATH.unshift "lib"
+    require "google/cloud/firestore"
+    puts "Cleaning up Firestore documents and collections."
+
+    firestore = Google::Cloud::Firestore.new
+    firestore.cols do |col|
+      begin
+        firestore.batch do |b|
+          col.select(:__name__).all_descendants.run do |doc|
+            b.delete doc
+          end
+        end
+      rescue => e
+        puts "Error while cleaning up #{col} documents.\n\n#{e}"
+      end
+    end
+  end
+
   task :run do
     $LOAD_PATH.unshift "lib", "acceptance"
     Dir.glob("acceptance/**/*_test.rb").each { |file| require_relative file }
